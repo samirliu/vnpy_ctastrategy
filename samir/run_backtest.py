@@ -5,7 +5,7 @@ import json
 from datetime import date, datetime
 from vnpy_ctastrategy.backtesting import BacktestingEngine
 from vnpy.trader.constant import Interval
-from dragen_channel_strategy_1128 import LlmStrategyExact as Strategy
+from dragen_channel_strategy_1128 import DragenStrategyExact as Strategy
 # from vnpy_ctastrategy.strategies.atr_rsi_strategy import AtrRsiStrategy as Strategy
 # 添加当前目录到Python路径，确保可以导入自定义策略
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -25,8 +25,8 @@ def run_backtest():
         # 设置回测参数
         engine.set_parameters(
             vt_symbol="XAUUSD.COMEX",  # 确保这个品种的数据已导入
-            interval=Interval.HOUR,
-            start=datetime(2024, 3, 21),
+            interval=Interval.DAILY,
+            start=datetime(2025, 3, 21),
             end=datetime(2025, 11, 28),
             rate=2.5e-05,      # 手续费
             slippage=0.2,      # 滑点
@@ -42,10 +42,11 @@ def run_backtest():
             "xma_n_2_1": 25,
             "xma_n_2": 25, 
             "belt_weights_len": 21,
-            "belt_smooth_period": 90
+            "belt_smooth_period": 90,
+            "target_intervals": "1d"
         }
         # 添加策略
-        engine.add_strategy(Strategy, {})
+        engine.add_strategy(Strategy, setting)
         # 导入您的策略（确保策略文件在同一目录）
          
         print("成功导入策略: LlmStrategyExact")
