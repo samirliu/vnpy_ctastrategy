@@ -26,7 +26,7 @@ def run_backtest():
         engine.set_parameters(
             vt_symbol="XAUUSD.COMEX",  # 确保这个品种的数据已导入
             interval=Interval.DAILY,
-            start=datetime(2025, 3, 21),
+            start=datetime(2025, 5, 21),
             end=datetime(2025, 11, 28),
             rate=2.5e-05,      # 手续费
             slippage=0.2,      # 滑点
@@ -41,7 +41,7 @@ def run_backtest():
             "xma_n_3_1": 25,
             "xma_n_2_1": 25,
             "xma_n_2": 25, 
-            "belt_weights_len": 21,
+            "belt_weights_len": 20,
             "belt_smooth_period": 90,
             "target_intervals": "1d"
         }

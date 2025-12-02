@@ -257,22 +257,22 @@ class DragenStrategyExact(CtaTemplate):
         # -------------------- 触发动作（日志 + 调用 on_signal） --------------------
         # 我把重复的日志打印封装成 _log_bar_info 来减少重复代码，但日志内容与原版保持一致
         if condition_buy:
-            self._log_bar_info("BUY", bar, g116_0, g116_1, g120_0, g120_1, slld0_0, slld8_0)
+            self._log_bar_info("BUY", bar, g116_0, g116_1, g120_0, g120_1, slld0_0, slld8_0, low_0, low_1, high_0, high_1)
             # 触发 BUY 与对应的 SL-BUY（原版同时触发）
             self.on_signal("BUY", price)
             self.on_signal("SL-BUY", price)
 
         elif condition_sell:
-            self._log_bar_info("SELL", bar, g116_0, g116_1, g120_0, g120_1, slld0_0, slld8_0)
+            self._log_bar_info("SELL", bar, g116_0, g116_1, g120_0, g120_1, slld0_0, slld8_0, low_0, low_1, high_0, high_1)
             self.on_signal("SELL", price)
             self.on_signal("SL-SELL", price)
 
         elif condition_close_buy:
-            self._log_bar_info("CLOSE-BUY", bar, g116_0, g116_1, g120_0, g120_1, slld0_0, slld8_0)
+            self._log_bar_info("CLOSE-BUY", bar, g116_0, g116_1, g120_0, g120_1, slld0_0, slld8_0, low_0, low_1, high_0, high_1)
             self.on_signal("CLOSE-BUY", price)
 
         elif condition_close_sell:
-            self._log_bar_info("CLOSE-SELL", bar, g116_0, g116_1, g120_0, g120_1, slld0_0, slld8_0)
+            self._log_bar_info("CLOSE-SELL", bar, g116_0, g116_1, g120_0, g120_1, slld0_0, slld8_0, low_0, low_1, high_0, high_1)
             self.on_signal("CLOSE-SELL", price)
 
         # 和原版一致：处理完成后发送事件
@@ -282,7 +282,7 @@ class DragenStrategyExact(CtaTemplate):
     # 日志辅助函数（把重复的写日志/打印封装，保持原信息）
     # ============================================================
     def _log_bar_info(self, tag: str, bar: BarData,
-                      g116_0, g116_1, g120_0, g120_1, slld0_0, slld8_0) -> None:
+                      g116_0, g116_1, g120_0, g120_1, slld0_0, slld8_0, low_0, low_1, high_0, high_1) -> None:
         """
         统一打印和 write_log 的信息格式，和原实现的信息一致。
         只做封装以减少重复代码。
@@ -295,6 +295,7 @@ class DragenStrategyExact(CtaTemplate):
         self.write_log(f"{tag} trigger")
         self.write_log(f"Bar信息 - 时间: {bar.datetime}, O: {bar.open_price}, H: {bar.high_price}, L: {bar.low_price}, C: {bar.close_price}, V: {bar.volume}")
         self.write_log(f"指标值: g116_0={g116_0:.6f}, g116_1={g116_1:.6f}, g120_0={g120_0:.6f}, g120_1={g120_1:.6f}, slld0_0={slld0_0:.6f}, slld8_0={slld8_0:.6f}")
+        self.write_log(f"价格: low_0={low_0:.4f}, low_1={low_1:.4f}, high_0={high_0:.4f}, high_1={high_1:.4f}")
         # 注意：原版还写了价格信息（low/high），如果需要可以再添加。当前保持内容一致性并简洁。
 
     # ============================================================
@@ -347,7 +348,10 @@ class DragenStrategyExact(CtaTemplate):
 
             belt0[i] = sum_high / self.weight_sum
             belt1[i] = sum_low / self.weight_sum
-
+            # print(
+            #     f"H={highs[i]}, L={lows[i]}"
+            #     f"Bar {i}, belt0={belt0[i]:.5f}, belt1={belt1[i]:.5f}"
+            # )
         # -------------------------
         # EMA 平滑（与 MQL4 保持一致）
         # belt2[i] = (2*belt0[i] + (period-1)*belt2[i+1]) / (period+1)
@@ -366,35 +370,37 @@ class DragenStrategyExact(CtaTemplate):
 
     def _compute_centered_ma_mql4(self, length: int, data: np.ndarray, window: int) -> np.ndarray:
         """
-        中心移动平均（复刻 MQL4 的 iMAOnArray / 中心化平均）
-        说明：
-        - data 的顺序与 MQL4 对齐（0=最新）
-        - 计算过程严格复刻你原先的实现（包含边界情况的特殊权重调整）
-        - 返回结果数组方向与输入相同（0=最新）
+        中心移动平均计算（保持 ArrayManager 顺序，但在计算时映射索引）
         """
         result = np.zeros(len(data))
         half_window = (window - 1) // 2
-
-        # MQL4 的遍历方向：从最旧到最新 OR 从最新到最旧取决实现——我们保持与原版相同遍历方式
-        # 这里使用 mql4_i 从 length-1 到 0 的遍历，可与原先源码逻辑保持一致（你原版就是这么写的）
-        for mql4_i in range(length - 1, -1, -1):
+        
+        # 使用 ArrayManager 顺序（0=最旧，-1=最新）
+        # 但在计算时映射到 MQL4 的逻辑
+        for mql4_i in range(length, -1, -1):  # 从最旧到最新 (与 MQL4 一致)
             if mql4_i >= half_window:
+                # 正常情况
                 sum_val = 0.0
-                # 从 mql4_i + half_window 向下累加到 mql4_i - half_window
                 for mql4_j in range(mql4_i + half_window, mql4_i - half_window - 1, -1):
+                    # 使用 lows[-1-mql4_j] 来访问 MQL4 索引对应的数据
+                    # if (mql4_j < len(data)):
                     sum_val += data[mql4_j]
                 result[mql4_i] = sum_val / window
             else:
-                # 边界情况：可用长度不足，使用调整权重（复刻原实现）
+                # 边界情况
                 sum_val = 0.0
                 for mql4_j in range(mql4_i + half_window, -1, -1):
+                    # if (mql4_j < len(data)):
                     sum_val += data[mql4_j]
-
-                # 原版的特殊权重调整：
+                
+                # MQL4 的特殊权重调整
                 adjustment = (half_window - mql4_i) / (half_window + mql4_i + 1)
-                # 注意：我们保持原版的计算方式（即 sum_val + sum_val*adjustment）/window
                 result[mql4_i] = (sum_val + sum_val * adjustment) / window
-
+        # result = result[::-1] 
+        # for i in range(0, length):
+        #     print(
+        #         f"Bar {i}: result={result[i]}"
+        #     )
         return result
 
     def _compute_xma_exact(self, length: int, highs: np.ndarray, lows: np.ndarray) -> tuple:
