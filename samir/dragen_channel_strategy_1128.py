@@ -7,14 +7,15 @@
 
 from datetime import time
 from functools import partial
-from typing import Dict, List
 import numpy as np
 
+from myconstant import Interval
+from myutility import BarGenerator
 from vnpy_ctastrategy import (
     CtaTemplate, StopOrder, TickData, BarData, TradeData,
-    OrderData, BarGenerator, ArrayManager
+    OrderData, ArrayManager
 )
-from vnpy_ctastrategy.backtesting import Interval
+# from vnpy_ctastrategy.backtesting import Interval
 
 
 class DragenStrategyExact(CtaTemplate):
@@ -42,20 +43,14 @@ class DragenStrategyExact(CtaTemplate):
     # weight_sum 采用与原版相同计算（class-level 计算，和实例属性一致）
     weight_sum = belt_weights_len * (belt_weights_len + 1) / 2
 # 支持用户传入多个目标周期，例如 ["4h","1d","1h","30m","15m"]
-    target_intervals: List[str] = ["4h"]
-    TF_MAP = {
-        "4h": (Interval.HOUR, 4),
-        "1h": (Interval.HOUR, 1),
-        "30m": (Interval.MINUTE, 30),
-        "15m": (Interval.MINUTE, 15),
-        "1d": (Interval.DAILY, 1),
-    }
+    long_kline = "4H"
+    _long_map = {"D": 60*24, "4H": 4*60, "1H": 60}
     parameters = [
         "fixed_size",
         "xma_n_3", "xma_n_3_1",
         "xma_n_2", "xma_n_2_1",
         "belt_weights_len", "belt_smooth_period",
-        "sh", "target_interval"
+        "sh", "target_intervals"
     ]
 
     variables = [
@@ -79,7 +74,8 @@ class DragenStrategyExact(CtaTemplate):
 
         # 保证 target_intervals 已由 setting 覆盖（如果存在）
         if isinstance(setting, dict) and setting.get("target_intervals"):
-            self.target_intervals = setting.get("target_intervals")
+            self.long_kline = setting.get("target_intervals")
+        self.long_minutes = self._long_map.get(self.long_kline, 60*4)
 
     def on_init(self) -> None:
         """
@@ -93,30 +89,43 @@ class DragenStrategyExact(CtaTemplate):
         # 每个周期创建独立的 ArrayManager（大小保持 300，和原版一致）
         self.am = ArrayManager(100)
 
-        # 构建每个目标周期的 BarGenerator 与 ArrayManager
-        tf = self.target_intervals
-        if tf not in self.TF_MAP:
-            raise ValueError(f"不支持的周期: {tf}")
-        
-        interval_type, window = self.TF_MAP[tf]
-
         # 绑定回调（使用 partial 传入目标周期标识）
-        on_window_bar = partial(self._on_tf_bar, tf)
-        if interval_type == Interval.DAILY:
-            # 如果你已有数据库日线，可以不传 daily_end，直接用数据库 bar 更新 am
-            # 也可以设一个默认 daily_end，比如每天 23:59
-            daily_end = time(0, 0)  # UTC+8 收盘时间
-            self.bg = BarGenerator(self.on_bar, window, on_window_bar, interval_type, daily_end=daily_end)
+        on_window_bar = partial(self._on_tf_bar, self.long_kline)
+        # 构建每个目标周期的 BarGenerator 与 ArrayManager
+        if self.long_kline == "D":
+            # 日线特殊处理，固定 daily_end
+            daily_end = time(21, 59)  # 收盘时间 00:00 UTC+8
+            self.bg_long = BarGenerator(
+                self.on_bar,
+                window=1,
+                on_window_bar=on_window_bar,
+                interval=Interval.DAILY,
+                daily_end=daily_end
+            )
+        elif self.long_kline == "4H":
+            self.bg_long = BarGenerator(
+                self.on_bar,
+                window=1,
+                on_window_bar=on_window_bar,
+                interval=Interval.FOUR_HOURS
+            )
         else:
-            self.bg = BarGenerator(self.on_bar, window, on_window_bar, interval_type)
+            # 其他周期按分钟聚合
+            self.bg_long = BarGenerator(
+                self.on_bar,
+                window=self.long_minutes,
+                on_window_bar=on_window_bar,
+                interval=Interval.MINUTE
+            )
+
         # 为每种 interval_type 加载历史（300）
-        try:
-            # note: 原版使用 load_bar(300, Interval.HOUR, None, True)
-            # 这里保持一致：加载最近 300 根该 interval_type 的 bar
-            self.load_bar(100, interval_type, None, True)
-        except Exception as e:
-            # 记录但继续（以保持容错性）
-            self.write_log(f"加载历史失败: {interval_type}, 错误: {e}")
+        # try:
+        #     # note: 原版使用 load_bar(300, Interval.HOUR, None, True)
+        #     # 这里保持一致：加载最近 300 根该 interval_type 的 bar
+        #     self.load_bar(100, interval_type, None, True)
+        # except Exception as e:
+        #     # 记录但继续（以保持容错性）
+        #     self.write_log(f"加载历史失败: {interval_type}, 错误: {e}")
 
     # ============================================================
     # 事件入口（保持原版流程）
@@ -126,13 +135,13 @@ class DragenStrategyExact(CtaTemplate):
         所有原始 bar（任意周期）都会经过这里。
         我们需要把原始 bar 发送给所有注册的 BarGenerator，让它们自行合成目标周期。
         """
-        print(f" Bar: {bar.datetime} O:{bar.open_price} H:{bar.high_price} L:{bar.low_price} C:{bar.close_price}，interval: {bar.interval}")
+        # print(f" Bar: {bar.datetime} O:{bar.open_price} H:{bar.high_price} L:{bar.low_price} C:{bar.close_price}，interval: {bar.interval}")
         try:
-            self.bg.update_bar(bar)
+            self.bg_long.update_bar(bar)
         except Exception as e:
             # 容错，记录错误
             self.write_log(f"BarGenerator.update_bar 错误: {e}")
-            
+ 
 # ------------------------- 合成周期回调 -------------------------
     def _on_tf_bar(self, tf: str, bar: BarData) -> None:
         """
