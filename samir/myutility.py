@@ -2,21 +2,24 @@
 General utility functions.
 """
 
-import json
-import sys
 from datetime import datetime, time
-from pathlib import Path
 from collections.abc import Callable
-from decimal import Decimal
-from math import floor, ceil
-
-import numpy as np
-import talib
-from zoneinfo import ZoneInfo, available_timezones      # noqa
 
 from vnpy.trader.object import BarData, TickData
-from myconstant import Exchange, Interval
 from vnpy.trader.locale import _
+from enum import Enum
+
+
+class Interval(Enum):
+    """
+    Interval of bar data.
+    """
+    MINUTE = "1m"
+    HOUR = "1h"
+    FOUR_HOURS = "4h"
+    DAILY = "d"
+    WEEKLY = "w"
+    TICK = "tick"
 
 
 class BarGenerator:
@@ -166,46 +169,6 @@ class BarGenerator:
 
             self.window_bar = None
 
-    # def update_bar_4hour_window(self, bar: BarData) -> None:
-    #     """
-    #     用一分钟数据生成 4小时K线
-    #     切点固定为 00:00, 04:00, 08:00, 12:00, 16:00, 20:00
-    #     """
-    #     dt = bar.datetime
-
-    #     # 判断当前 bar 是否是一个 4h 窗口结束点
-    #     # finished 表示当前窗口是否结束
-    #     finished = (dt.hour % 4 == 0 and dt.minute == 0)
-
-    #     if self.window_bar is None:
-    #         # 初始化一个新的 4h K 线
-    #         self.window_bar = BarData(
-    #             symbol=bar.symbol,
-    #             exchange=bar.exchange,
-    #             datetime=dt.replace(minute=0, second=0, microsecond=0),
-    #             interval="4h",
-    #             volume=bar.volume,
-    #             open_price=bar.open_price,
-    #             high_price=bar.high_price,
-    #             low_price=bar.low_price,
-    #             close_price=bar.close_price,
-    #             gateway_name=bar.gateway_name
-    #         )
-    #         return
-
-    #     # 合并当前分钟 bar 到窗口 K 线
-    #     self.window_bar.high_price = max(self.window_bar.high_price, bar.high_price)
-    #     self.window_bar.low_price = min(self.window_bar.low_price, bar.low_price)
-    #     self.window_bar.close_price = bar.close_price
-    #     self.window_bar.volume += bar.volume
-
-    #     # 如果窗口结束，触发 on_window_bar 回调
-    #     if finished:
-    #         if self.on_window_bar:
-    #             self.on_window_bar(self.window_bar)
-
-    #         # 重置窗口，准备下一个 4h K 线
-    #         self.window_bar = None
     def update_bar_4hour_window(self, bar: BarData):
         """
         用分钟数据生成 4小时K线
@@ -334,7 +297,6 @@ class BarGenerator:
         # Push finished window bar
         if finished_bar:
             self.on_hour_bar(finished_bar)
-
 
     def on_hour_bar(self, bar: BarData) -> None:
         """"""

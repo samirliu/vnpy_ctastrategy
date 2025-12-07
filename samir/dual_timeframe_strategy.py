@@ -23,7 +23,6 @@ from vnpy_ctastrategy.base import (
 )
 
 
-# -------------------------
 # 数据结构
 # -------------------------
 @dataclass
@@ -116,10 +115,6 @@ class ShenlongLong(LongSignalStrategy):
         - 'close_long' / 'close_short' → 立即平仓
         - None → 无信号
         """
-        if not am.inited or len(am.close_array) < max(
-            self.sh, self.xma_n_3_1 + self.xma_n_3
-        ):
-            return None
 
         highs = am.high_array[::-1]  # 0 最新
         lows = am.low_array[::-1]
@@ -405,7 +400,7 @@ class DualStrategy(CtaTemplate):
                 window=1,
                 on_window_bar=self.on_long_bar,
                 interval=Interval.DAILY,
-                daily_end=time(0, 0),
+                daily_end=time(21, 59),
             )
         else:
             self.bg_long = BarGenerator(
@@ -429,6 +424,9 @@ class DualStrategy(CtaTemplate):
         self.long_signal_strategy: LongSignalStrategy = ShenlongLong()
         self.short_signal_strategy: ShortSignalStrategy = EMA_CrossShort()
 
+    def on_init(self):
+        self.write_log("DualStrategy initialized")
+
     # -------------------------
     # 主 on_bar
     # -------------------------
@@ -446,14 +444,14 @@ class DualStrategy(CtaTemplate):
         self.am_long.update_bar(bar)
         if not self.am_long.inited:
             return
-
+        print(f"[{self.long_bar_count}] 计数器 Bar: {bar.datetime} O:{bar.open_price} H:{bar.high_price} L:{bar.low_price} C:{bar.close_price}")
         signal = self.long_signal_strategy.generate_window_signal(self.am_long, bar)
 
         # 平仓信号优先
         if signal == "close_long" and self.pos_state.direction == "long":
-            self.close_position(bar.close, "LongWindow Close triggered")
+            self.close_position(bar.close_price, "LongWindow Close triggered")
         elif signal == "close_short" and self.pos_state.direction == "short":
-            self.close_position(bar.close, "ShortWindow Close triggered")
+            self.close_position(bar.close_price, "ShortWindow Close triggered")
         # 新窗口开仓
         elif signal in ["long", "short"]:
             self.pending_windows[signal] = PendingWindow(
@@ -469,11 +467,11 @@ class DualStrategy(CtaTemplate):
             if signal == "long" and (
                 self.pos_state.direction == "short" or getattr(self, "pos", 0) < 0
             ):
-                self.close_position(bar.close, "Reversed by long-window")
+                self.close_position(bar.close_price, "Reversed by long-window")
             elif signal == "short" and (
                 self.pos_state.direction == "long" or getattr(self, "pos", 0) > 0
             ):
-                self.close_position(bar.close, "Reversed by short-window")
+                self.close_position(bar.close_price, "Reversed by short-window")
 
         # 清理过期窗口
         expired = []
@@ -499,18 +497,18 @@ class DualStrategy(CtaTemplate):
             )
             if entry_signal == "long":
                 self.open_long(
-                    bar.close,
+                    bar.close_price,
                     self.trade_volume,
-                    bar.close - atr * self.sl_multiplier,
-                    bar.close + atr * self.tp_multiplier,
+                    bar.close_price - atr * self.sl_multiplier,
+                    bar.close_price + atr * self.tp_multiplier,
                 )
                 self.trades_taken_in_window[side] += 1
             elif entry_signal == "short":
                 self.open_short(
-                    bar.close,
+                    bar.close_price,
                     self.trade_volume,
-                    bar.close + atr * self.sl_multiplier,
-                    bar.close - atr * self.tp_multiplier,
+                    bar.close_price + atr * self.sl_multiplier,
+                    bar.close_price - atr * self.tp_multiplier,
                 )
                 self.trades_taken_in_window[side] += 1
         self.check_signal_exit(bar)
@@ -587,14 +585,14 @@ class DualStrategy(CtaTemplate):
         sl = self.pos_state.sl
         tp = self.pos_state.tp
         if self.pos_state.direction == "long":
-            if sl and bar.low <= sl:
+            if sl and bar.low_price <= sl:
                 self.close_position(sl, "SL_LONG hit")
-            elif tp and bar.high >= tp:
+            elif tp and bar.high_price >= tp:
                 self.close_position(tp, "TP_LONG hit")
         elif self.pos_state.direction == "short":
-            if sl and bar.high >= sl:
+            if sl and bar.high_price >= sl:
                 self.close_position(sl, "SL_SHORT hit")
-            elif tp and bar.low <= tp:
+            elif tp and bar.low_price <= tp:
                 self.close_position(tp, "TP_SHORT hit")
 
     # -------------------------

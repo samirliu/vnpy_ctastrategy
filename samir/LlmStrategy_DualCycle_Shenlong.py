@@ -1,6 +1,9 @@
-# LlmStrategy_DualCycle_Pluggable.py
-# 双周期通用策略框架：窗口管理 + 插件化长短周期信号策略
-# 回测/实盘统一，部分成交当完全成交，SL/TP安全判断
+# LlmStrategy_DualCycle_Shenlong.py
+# 双周期通用策略框架：
+# - 长周期 Shenlong 信号插件（可触发开仓或平仓）
+# - 短周期 EMA/Cross 信号插件（仅在 long/short window 内开仓）
+# - 支持回测和实盘统一
+# - 完整 SL/TP、安全平仓处理
 
 from typing import Dict, Optional
 from dataclasses import dataclass
@@ -16,17 +19,25 @@ from vnpy.trader.constant import Interval, Direction, Offset
 # -------------------------
 @dataclass
 class PendingWindow:
-    direction: str  # long / short
+    """
+    长周期窗口信息：
+    - direction: 当前窗口方向 long/short
+    - start_bar: 窗口开始的长周期 Bar 计数
+    - long_end: 窗口结束 Bar 计数
+    - long_end_time: 窗口结束时间
+    """
+
+    direction: str
     start_bar: int
     long_end: int
     long_end_time: datetime
 
 
 class PositionState:
-    """内部仓位状态"""
+    """内部仓位状态管理"""
 
     def __init__(self):
-        self.direction: Optional[str] = None
+        self.direction: Optional[str] = None  # long/short/None
         self.entry_price: float = 0.0
         self.sl: float = 0.0
         self.tp: float = 0.0
@@ -34,49 +45,210 @@ class PositionState:
 
 
 # -------------------------
-# 信号接口
+# 信号策略接口
 # -------------------------
 class LongSignalStrategy:
-    """长周期窗口策略接口"""
+    """
+    长周期策略接口：
+    - 返回值可为 'long'/'short'（开仓）或 'close_long'/'close_short'（平仓）或 None
+    """
 
     def generate_window_signal(self, am: ArrayManager, bar: BarData):
-        """返回 'long'/'short'/None"""
         return None
 
 
 class ShortSignalStrategy:
-    """短周期开仓策略接口"""
+    """
+    短周期策略接口：
+    - 只在 long/short pending window 内触发开仓信号
+    - 返回值 'long'/'short'/None
+    """
 
     def generate_entry_signal(
         self, am: ArrayManager, bar: BarData, window_direction: str
     ):
-        """返回 'long'/'short'/None"""
         return None
 
 
 # -------------------------
-# 默认示例策略
+# 长周期插件示例：Shenlong
 # -------------------------
-class BBandsLong(LongSignalStrategy):
-    def __init__(self, window=20, dev=2.0):
-        self.window = window
-        self.dev = dev
+class ShenlongLong(LongSignalStrategy):
+    """
+    Shenlong 指标复刻：
+    - 可触发开仓 'long'/'short'
+    - 可触发平仓 'close_long'/'close_short'
+    """
 
-    def generate_window_signal(self, am, bar):
-        if not am.inited:
+    def __init__(
+        self,
+        sh=30,
+        xma_n_3=25,
+        xma_n_3_1=25,
+        xma_n_2=25,
+        xma_n_2_1=25,
+        belt_weights_len=20,
+        belt_smooth_period=90,
+    ):
+        self.sh = sh
+        self.xma_n_3 = xma_n_3
+        self.xma_n_3_1 = xma_n_3_1
+        self.xma_n_2 = xma_n_2
+        self.xma_n_2_1 = xma_n_2_1
+        self.belt_weights_len = belt_weights_len
+        self.belt_smooth_period = belt_smooth_period
+        
+
+    def generate_window_signal(self, am: ArrayManager, bar: BarData):
+        """
+        返回：
+        - 'long' / 'short' → 新窗口触发短周期开仓
+        - 'close_long' / 'close_short' → 立即平仓
+        - None → 无信号
+        """
+        if not am.inited or len(am.close_array) < max(
+            self.sh, self.xma_n_3_1 + self.xma_n_3
+        ):
             return None
-        mid = am.sma(self.window)
-        std = am.std(self.window)
-        upper = mid + self.dev * std
-        lower = mid - self.dev * std
-        if bar.high >= upper:
-            return "short"
-        elif bar.low <= lower:
+
+        highs = am.high_array[::-1]  # 0 最新
+        lows = am.low_array[::-1]
+        length = len(highs) - self.sh
+
+        # Belt/XMA 计算
+        belt2, belt3, belt4, slld_0, slld_8 = self._compute_belt_exact(
+            length, highs, lows
+        )
+        xma3_1, xma2_1 = self._compute_xma_exact(length, highs, lows)
+
+        # g_ibuf buffers
+        g_ibuf_116 = 2.0 * xma3_1 - xma2_1
+        g_ibuf_120 = 2.0 * xma2_1 - xma3_1
+
+        def safe(arr, idx):
+            try:
+                return float(arr[idx])
+            except:
+                return float("nan")
+
+        g116_0 = safe(g_ibuf_116, 0)
+        g116_1 = safe(g_ibuf_116, 1)
+        g120_0 = safe(g_ibuf_120, 0)
+        g120_1 = safe(g_ibuf_120, 1)
+        slld0_0 = safe(slld_0, 0)
+        slld8_0 = safe(slld_8, 0)
+        low_0, low_1 = lows[0], lows[1]
+        high_0, high_1 = highs[0], highs[1]
+
+        # 开仓条件
+        condition_buy = (
+            g116_1 < low_1
+            and g116_0 > low_0
+            and (
+                (g120_0 > slld0_0 and g116_0 > slld8_0)
+                or (g120_0 < slld0_0 and g116_0 > slld8_0)
+            )
+        )
+        condition_sell = (
+            high_1 < g120_1
+            and high_0 > g120_0
+            and (
+                (g120_0 < slld0_0 and g116_0 < slld8_0)
+                or (g120_0 < slld0_0 and g116_0 > slld8_0)
+            )
+        )
+
+        # 平仓条件
+        condition_close_buy = (
+            high_1 < g120_1
+            and high_0 > g120_0
+            and (
+                (g120_0 > slld0_0 and g116_0 > slld8_0)
+                or not (g120_0 < slld0_0 and g116_0 > slld8_0)
+            )
+        )
+        condition_close_sell = (
+            g116_1 < low_1
+            and g116_0 > low_0
+            and (
+                (g120_0 < slld0_0 and g116_0 < slld8_0)
+                or not (g120_0 < slld0_0 and g116_0 > slld8_0)
+            )
+        )
+
+        if condition_buy:
             return "long"
+        elif condition_sell:
+            return "short"
+        elif condition_close_buy:
+            return "close_long"
+        elif condition_close_sell:
+            return "close_short"
         return None
 
+    # -------------------------
+    # Belt/XMA 计算（复刻 MQL4）
+    # -------------------------
+    def _compute_belt_exact(self, length, highs, lows):
+        n = self.belt_weights_len + 1
+        if length < n:
+            return tuple([[float("nan")] * length for _ in range(5)])
+        belt0 = [0.0] * length
+        belt1 = [0.0] * length
+        belt2 = [0.0] * length
+        belt3 = [0.0] * length
+        belt4 = [0.0] * length
+        slld_0 = [0.0] * length
+        slld_8 = [0.0] * length
+        weight_sum = sum(range(1, n + 1))
+        for i in range(length - 1, -1, -1):
+            if i + self.belt_weights_len >= len(highs):
+                continue
+            sum_high = 0.0
+            sum_low = 0.0
+            for w in range(n):
+                weight = self.belt_weights_len - w
+                sum_high += weight * highs[i + w]
+                sum_low += weight * lows[i + w]
+            belt0[i] = sum_high / weight_sum
+            belt1[i] = sum_low / weight_sum
+        for i in range(length - 2, -1, -1):
+            belt2[i] = (2 * belt0[i] + (self.belt_smooth_period - 1) * belt2[i + 1]) / (
+                self.belt_smooth_period + 1
+            )
+            belt3[i] = (2 * belt1[i] + (self.belt_smooth_period - 1) * belt3[i + 1]) / (
+                self.belt_smooth_period + 1
+            )
+        belt4 = [b2 - b3 for b2, b3 in zip(belt2, belt3)]
+        slld_0 = [b2 + 2 * b4 for b2, b4 in zip(belt2, belt4)]
+        slld_8 = [b3 - 2 * b4 for b3, b4 in zip(belt3, belt4)]
+        return belt2, belt3, belt4, slld_0, slld_8
 
+    def _compute_centered_ma_mql4(self, length, data, window):
+        """复刻 MQL4 中心化 MA"""
+        result = [0.0] * len(data)
+        half = (window - 1) // 2
+        for i in range(length, -1, -1):
+            if i >= half:
+                result[i] = sum(data[i - half : i + half + 1]) / window
+            else:
+                result[i] = sum(data[0 : i + half + 1]) / window
+        return result
+
+    def _compute_xma_exact(self, length, highs, lows):
+        xma3_0 = self._compute_centered_ma_mql4(length, lows, self.xma_n_3)
+        xma3_1 = self._compute_centered_ma_mql4(length, xma3_0, self.xma_n_3_1)
+        xma2_0 = self._compute_centered_ma_mql4(length, highs, self.xma_n_2)
+        xma2_1 = self._compute_centered_ma_mql4(length, xma2_0, self.xma_n_2_1)
+        return xma3_1, xma2_1
+
+
+# -------------------------
+# 短周期策略示例：EMA Cross
+# -------------------------
 class EMA_CrossShort(ShortSignalStrategy):
+    """短周期开仓策略示例"""
+
     def __init__(self, fast=5, slow=30):
         self.fast = fast
         self.slow = slow
@@ -96,12 +268,11 @@ class EMA_CrossShort(ShortSignalStrategy):
 
 
 # -------------------------
-# 核心策略
+# 核心策略类
 # -------------------------
 class LlmStrategy(CtaTemplate):
     author = "ChatGPT"
 
-    # 参数
     long_kline = "D"
     short_kline = "30m"
     signal_window = 4
@@ -123,7 +294,6 @@ class LlmStrategy(CtaTemplate):
     ]
     variables = ["long_bar_count"]
 
-    # 初始化
     def __init__(self, cta_engine, strategy_name: str, vt_symbol: str, setting: dict):
         super().__init__(cta_engine, strategy_name, vt_symbol, setting)
 
@@ -135,13 +305,13 @@ class LlmStrategy(CtaTemplate):
         self.trades_taken_in_window: Dict[str, int] = {"long": 0, "short": 0}
         self.long_bar_count: int = 0
 
-        # 周期分钟
+        # 周期映射
         self._long_map = {"D": 60 * 24, "4H": 4 * 60, "1H": 60}
         self._short_map = {"1H": 60, "30m": 30, "15m": 15, "5m": 5}
         self.long_minutes = self._long_map.get(self.long_kline, 60 * 24)
         self.short_minutes = self._short_map.get(self.short_kline, 30)
 
-        # BarGenerators
+        # BarGenerator 初始化
         if self.long_kline == "D":
             self.bg_long = BarGenerator(
                 self.on_bar,
@@ -164,24 +334,25 @@ class LlmStrategy(CtaTemplate):
             interval=Interval.MINUTE,
         )
 
-        # ArrayManagers
-        self.am_long = ArrayManager(300)
-        self.am_short = ArrayManager(300)
+        # ArrayManager
+        self.am_long = ArrayManager(100)
+        self.am_short = ArrayManager(100)
 
-        # 默认策略插件
-        self.long_signal_strategy: LongSignalStrategy = BBandsLong()
+        # 默认插件
+        self.long_signal_strategy: LongSignalStrategy = ShenlongLong()
         self.short_signal_strategy: ShortSignalStrategy = EMA_CrossShort()
 
     # -------------------------
     # 主 on_bar
     # -------------------------
     def on_bar(self, bar: BarData):
+        """接收每根分钟/日线"""
         self.check_exit_conditions(bar)
         self.bg_long.update_bar(bar)
         self.bg_short.update_bar(bar)
 
     # -------------------------
-    # 长周期窗口
+    # 长周期处理
     # -------------------------
     def on_long_bar(self, bar: BarData):
         self.long_bar_count += 1
@@ -190,17 +361,24 @@ class LlmStrategy(CtaTemplate):
             return
 
         signal = self.long_signal_strategy.generate_window_signal(self.am_long, bar)
-        if signal:
+
+        # 平仓信号优先
+        if signal == "close_long" and self.pos_state.direction == "long":
+            self.close_position(bar.close, "LongWindow Close triggered")
+        elif signal == "close_short" and self.pos_state.direction == "short":
+            self.close_position(bar.close, "ShortWindow Close triggered")
+        # 新窗口开仓
+        elif signal in ["long", "short"]:
             self.pending_windows[signal] = PendingWindow(
                 direction=signal,
                 start_bar=self.long_bar_count,
                 long_end=self.long_bar_count + self.signal_window,
-                long_end_time=bar.datetime + timedelta(days=1),  # 可调整
+                long_end_time=bar.datetime + timedelta(days=1),
             )
             self.trades_taken_in_window[signal] = 0
             opposite = "long" if signal == "short" else "short"
             self.pending_windows.pop(opposite, None)
-            # 平掉相反仓位
+            # 立即反转平仓
             if signal == "long" and (
                 self.pos_state.direction == "short" or getattr(self, "pos", 0) < 0
             ):
@@ -225,7 +403,6 @@ class LlmStrategy(CtaTemplate):
         self.am_short.update_bar(bar)
         if not self.am_short.inited:
             return
-
         atr = self.am_short.atr(self.atr_window)
         for side in list(self.pending_windows.keys()):
             if self.trades_taken_in_window[side] >= self.max_trades_per_window:
@@ -249,12 +426,10 @@ class LlmStrategy(CtaTemplate):
                     bar.close - atr * self.tp_multiplier,
                 )
                 self.trades_taken_in_window[side] += 1
-
-        # 信号反向平仓检查
         self.check_signal_exit(bar)
 
     # -------------------------
-    # 开仓委托
+    # 开仓/平仓接口
     # -------------------------
     def open_long(self, price, volume, sl, tp):
         try:
@@ -286,9 +461,6 @@ class LlmStrategy(CtaTemplate):
         }
         self.write_log(f"[open_short] price={price} vol={volume} orderid={orderid}")
 
-    # -------------------------
-    # 平仓
-    # -------------------------
     def close_position(self, price, reason):
         net_pos = getattr(self, "pos", None)
         if net_pos is not None:
@@ -339,10 +511,10 @@ class LlmStrategy(CtaTemplate):
                 self.close_position(tp, "TP_SHORT hit")
 
     # -------------------------
-    # EMA 或其他信号反向平仓
+    # 插件接口：短周期信号触发平仓
     # -------------------------
     def check_signal_exit(self, bar: BarData):
-        # 默认不做，留接口给 short_signal_strategy 插件
+        # 可由 short_signal_strategy 或其他插件实现反向平仓逻辑
         pass
 
     # -------------------------
