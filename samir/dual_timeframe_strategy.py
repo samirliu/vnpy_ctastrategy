@@ -18,9 +18,7 @@ from vnpy_ctastrategy import (
     TradeData,
     ArrayManager,
 )
-from vnpy_ctastrategy.base import (
-    Offset
-)
+from vnpy_ctastrategy.base import Offset
 
 
 # 数据结构
@@ -87,6 +85,7 @@ class ShenlongLong(LongSignalStrategy):
 
     def __init__(
         self,
+        owner,
         sh=30,
         xma_n_3=25,
         xma_n_3_1=25,
@@ -95,6 +94,7 @@ class ShenlongLong(LongSignalStrategy):
         belt_weights_len=20,
         belt_smooth_period=90,
     ):
+        self.owner = owner
         self.sh = sh
         self.xma_n_3 = xma_n_3
         self.xma_n_3_1 = xma_n_3_1
@@ -180,14 +180,50 @@ class ShenlongLong(LongSignalStrategy):
                 or not (g120_0 < slld0_0 and g116_0 > slld8_0)
             )
         )
-
+        split = "[generate_window_signal]  "
         if condition_buy:
+            self.owner.write_log(
+                f"{split}long trigger Bar信息 - 时间: {bar.datetime}, O: {bar.open_price}, H: {bar.high_price}, L: {bar.low_price}, C: {bar.close_price}, V: {bar.volume}"
+            )
+            self.owner.write_log(
+                f"{split}指标值: g116_0={g116_0:.6f}, g116_1={g116_1:.6f}, g120_0={g120_0:.6f}, g120_1={g120_1:.6f}, slld0_0={slld0_0:.6f}, slld8_0={slld8_0:.6f}"
+            )
+            self.owner.write_log(
+                f"{split}价格: low_0={low_0:.4f}, low_1={low_1:.4f}, high_0={high_0:.4f}, high_1={high_1:.4f}"
+            )
             return "long"
         elif condition_sell:
+            self.owner.write_log(
+                f"{split}short trigger Bar信息 - 时间: {bar.datetime}, O: {bar.open_price}, H: {bar.high_price}, L: {bar.low_price}, C: {bar.close_price}, V: {bar.volume}"
+            )
+            self.owner.write_log(
+                f"{split}指标值: g116_0={g116_0:.6f}, g116_1={g116_1:.6f}, g120_0={g120_0:.6f}, g120_1={g120_1:.6f}, slld0_0={slld0_0:.6f}, slld8_0={slld8_0:.6f}"
+            )
+            self.owner.write_log(
+                f"{split}价格: low_0={low_0:.4f}, low_1={low_1:.4f}, high_0={high_0:.4f}, high_1={high_1:.4f}"
+            )
             return "short"
         elif condition_close_buy:
+            self.owner.write_log(
+                f"{split}close_long Bar信息 - 时间: {bar.datetime}, O: {bar.open_price}, H: {bar.high_price}, L: {bar.low_price}, C: {bar.close_price}, V: {bar.volume}"
+            )
+            self.owner.write_log(
+                f"{split}指标值: g116_0={g116_0:.6f}, g116_1={g116_1:.6f}, g120_0={g120_0:.6f}, g120_1={g120_1:.6f}, slld0_0={slld0_0:.6f}, slld8_0={slld8_0:.6f}"
+            )
+            self.owner.write_log(
+                f"{split}价格: low_0={low_0:.4f}, low_1={low_1:.4f}, high_0={high_0:.4f}, high_1={high_1:.4f}"
+            )
             return "close_long"
         elif condition_close_sell:
+            self.owner.write_log(
+                f"{split}close_short Bar信息 - 时间: {bar.datetime}, O: {bar.open_price}, H: {bar.high_price}, L: {bar.low_price}, C: {bar.close_price}, V: {bar.volume}"
+            )
+            self.owner.write_log(
+                f"{split}指标值: g116_0={g116_0:.6f}, g116_1={g116_1:.6f}, g120_0={g120_0:.6f}, g120_1={g120_1:.6f}, slld0_0={slld0_0:.6f}, slld8_0={slld8_0:.6f}"
+            )
+            self.owner.write_log(
+                f"{split}价格: low_0={low_0:.4f}, low_1={low_1:.4f}, high_0={high_0:.4f}, high_1={high_1:.4f}"
+            )
             return "close_short"
         return None
 
@@ -331,21 +367,25 @@ class ShenlongLong(LongSignalStrategy):
 class EMA_CrossShort(ShortSignalStrategy):
     """短周期开仓策略示例"""
 
-    def __init__(self, fast=5, slow=30):
+    def __init__(self, owner, fast=5, slow=30):
         self.fast = fast
         self.slow = slow
+        self.owner = owner
+        self.fast_ema = []
+        self.slow_ema = []
 
     def generate_entry_signal(self, am, bar, window_direction):
         if not am.inited:
             return None
-        # fast = am.ema(self.fast)
-        # slow = am.ema(self.slow)
+        fast = am.ema(self.fast, True)
+        slow = am.ema(self.slow, True)
+        
         if window_direction == "long":
-            # if fast[-2] < slow[-2] and fast[-1] > slow[-1]:
-            return "long"
+            if fast[-2] < slow[-2] and fast[-1] > slow[-1]:
+                return "long"
         elif window_direction == "short":
-            # if fast[-2] > slow[-2] and fast[-1] < slow[-1]:
-            return "short"
+            if fast[-2] > slow[-2] and fast[-1] < slow[-1]:
+                return "short"
         return None
 
 
@@ -421,8 +461,8 @@ class DualStrategy(CtaTemplate):
         self.am_short = ArrayManager(100)
 
         # 默认插件
-        self.long_signal_strategy: LongSignalStrategy = ShenlongLong()
-        self.short_signal_strategy: ShortSignalStrategy = EMA_CrossShort()
+        self.long_signal_strategy: LongSignalStrategy = ShenlongLong(owner = self)
+        self.short_signal_strategy: ShortSignalStrategy = EMA_CrossShort(owner = self)
 
     def on_init(self):
         self.write_log("DualStrategy initialized")
@@ -444,7 +484,10 @@ class DualStrategy(CtaTemplate):
         self.am_long.update_bar(bar)
         if not self.am_long.inited:
             return
-        print(f"[{self.long_bar_count}] 计数器 Bar: {bar.datetime} O:{bar.open_price} H:{bar.high_price} L:{bar.low_price} C:{bar.close_price}")
+        print(
+            f"[{self.long_bar_count}] 计数器 Bar: {bar.datetime} O:{bar.open_price} H:{bar.high_price} L:{bar.low_price} C:{bar.close_price}"
+            f" pos_state info: {self.pos_state.direction}, {self.pos_state.entry_price},{self.pos_state.volume}, {self.pos_state.tp}, {self.pos_state.sl}"
+        )
         signal = self.long_signal_strategy.generate_window_signal(self.am_long, bar)
 
         # 平仓信号优先
@@ -476,8 +519,9 @@ class DualStrategy(CtaTemplate):
         # 清理过期窗口
         expired = []
         for side, w in self.pending_windows.items():
-            if self.long_bar_count >= w.long_end or bar.datetime >= w.long_end_time:
+            if self.long_bar_count >= w.long_end:
                 expired.append(side)
+                self.write_log(f"[on_long_bar] expired.append bar: direction={w.direction} start_bar={w.start_bar} long_end={w.long_end}")
         for k in expired:
             del self.pending_windows[k]
 
@@ -529,7 +573,7 @@ class DualStrategy(CtaTemplate):
             "tp": tp,
             "orderid": orderid,
         }
-        self.write_log(f"[open_long] price={price} vol={volume} orderid={orderid}")
+        self.write_log(f"[open_long] price={price} vol={volume} orderid={orderid} sl={sl} tp={tp}")
 
     def open_short(self, price, volume, sl, tp):
         try:
@@ -544,7 +588,7 @@ class DualStrategy(CtaTemplate):
             "tp": tp,
             "orderid": orderid,
         }
-        self.write_log(f"[open_short] price={price} vol={volume} orderid={orderid}")
+        self.write_log(f"[open_short] price={price} vol={volume} orderid={orderid} sl={sl} tp={tp}")
 
     def close_position(self, price, reason):
         net_pos = getattr(self, "pos", None)
@@ -606,10 +650,15 @@ class DualStrategy(CtaTemplate):
     # 成交同步
     # -------------------------
     def on_trade(self, trade: TradeData):
+        self.write_log(
+            f"[on_trade] orderid={trade.orderid}, trade bar={trade.datetime}, "
+            f"{trade.direction.name}-{trade.offset.name}, "
+            f"price={trade.price}, volume={trade.volume}"
+        )
         try:
             if trade.offset == Offset.OPEN:
                 pending = self._pending_entry or {}
-                if pending and pending.get("orderid") == trade.orderid:
+                if pending:
                     side = pending["side"]
                     sl = pending.get("sl")
                     tp = pending.get("tp")
@@ -619,7 +668,9 @@ class DualStrategy(CtaTemplate):
                     self.pos_state.sl = sl
                     self.pos_state.tp = tp
                     self._pending_entry = None
+            # 如果收到平仓信号
             elif trade.offset == Offset.CLOSE:
+                # 持有多头且收到平多信号
                 if (
                     self.pos_state.direction == "long"
                     and trade.direction == Direction.SHORT
@@ -627,6 +678,7 @@ class DualStrategy(CtaTemplate):
                     self.pos_state.volume -= trade.volume
                     if self.pos_state.volume <= 0:
                         self.pos_state = PositionState()
+                # 持有空头且收到平空信号
                 elif (
                     self.pos_state.direction == "short"
                     and trade.direction == Direction.LONG
@@ -635,13 +687,21 @@ class DualStrategy(CtaTemplate):
                     if self.pos_state.volume <= 0:
                         self.pos_state = PositionState()
                 pending_close = self._pending_close or {}
-                if pending_close and pending_close.get("orderid") == trade.orderid:
+                if pending_close:
                     self._pending_close = None
         except Exception as e:
             self.write_error(f"on_trade error: {e}")
 
     def on_order(self, order):
+        self.write_log(
+            f"[on_order] orderid={order.orderid}, order bar={order.datetime}, "
+            f"status={order.status}, is_buy={order.direction}, volume={order.volume}"
+        )
         pass
 
     def on_stop_order(self, stop_order):
+        self.write_log(
+            f"[on_stop_order] orderid={stop_order.orderid}, order bar={stop_order.datetime}, "
+            f"status={stop_order.status}, is_buy={stop_order.direction}, volume={stop_order.volume}"
+        )
         pass
