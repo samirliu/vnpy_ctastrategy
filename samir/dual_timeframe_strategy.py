@@ -382,9 +382,11 @@ class EMA_CrossShort(ShortSignalStrategy):
         
         if window_direction == "long":
             if fast[-2] < slow[-2] and fast[-1] > slow[-1]:
+                self.owner.write_log(f"[generate_entry_signal] signal long - fast[-2]: {fast[-2]}, slow[-2]: {slow[-2]}, fast[-1]: {fast[-1]}, slow[-1]: {slow[-1]}")
                 return "long"
         elif window_direction == "short":
             if fast[-2] > slow[-2] and fast[-1] < slow[-1]:
+                self.owner.write_log(f"[generate_entry_signal] signal short - fast[-2]: {fast[-2]}, slow[-2]: {slow[-2]}, fast[-1]: {fast[-1]}, slow[-1]: {slow[-1]}")
                 return "short"
         return None
 
@@ -395,7 +397,7 @@ class EMA_CrossShort(ShortSignalStrategy):
 class DualStrategy(CtaTemplate):
     author = "samirliu"
 
-    long_kline = "D"
+    long_kline = "d"
     short_kline = "30m"
     signal_window = 4
     atr_window = 14
@@ -403,6 +405,9 @@ class DualStrategy(CtaTemplate):
     tp_multiplier = 4.0
     max_trades_per_window = 1
     trade_volume = 1
+    max_pos = 1
+    short_fast_ema = 5
+    short_slow_ema = 30
 
     parameters = [
         "long_kline",
@@ -413,6 +418,9 @@ class DualStrategy(CtaTemplate):
         "tp_multiplier",
         "max_trades_per_window",
         "trade_volume",
+        "max_pos",
+        "short_fast_ema",
+        "short_slow_ema"
     ]
     variables = ["long_bar_count"]
 
@@ -428,19 +436,26 @@ class DualStrategy(CtaTemplate):
         self.long_bar_count: int = 0
 
         # 周期映射
-        self._long_map = {"D": 60 * 24, "4H": 4 * 60, "1H": 60}
+        self._long_map = {"d": 60 * 24, "4h": 4 * 60, "1h": 60}
         self._short_map = {"1H": 60, "30m": 30, "15m": 15, "5m": 5}
         self.long_minutes = self._long_map.get(self.long_kline, 60 * 24)
         self.short_minutes = self._short_map.get(self.short_kline, 30)
 
         # BarGenerator 初始化
-        if self.long_kline == "D":
+        if self.long_kline == "d":
             self.bg_long = BarGenerator(
                 self.on_bar,
                 window=1,
                 on_window_bar=self.on_long_bar,
                 interval=Interval.DAILY,
                 daily_end=time(21, 59),
+            )
+        elif self.long_kline == "4h":
+            self.bg_long = BarGenerator(
+                self.on_bar,
+                window=self.long_minutes,
+                on_window_bar=self.on_long_bar,
+                interval=Interval.FOUR_HOURS
             )
         else:
             self.bg_long = BarGenerator(
@@ -462,7 +477,7 @@ class DualStrategy(CtaTemplate):
 
         # 默认插件
         self.long_signal_strategy: LongSignalStrategy = ShenlongLong(owner = self)
-        self.short_signal_strategy: ShortSignalStrategy = EMA_CrossShort(owner = self)
+        self.short_signal_strategy: ShortSignalStrategy = EMA_CrossShort(owner = self, fast=self.short_fast_ema, slow=self.short_slow_ema)
 
     def on_init(self):
         self.write_log("DualStrategy initialized")
@@ -489,20 +504,23 @@ class DualStrategy(CtaTemplate):
             f" pos_state info: {self.pos_state.direction}, {self.pos_state.entry_price},{self.pos_state.volume}, {self.pos_state.tp}, {self.pos_state.sl}"
         )
         signal = self.long_signal_strategy.generate_window_signal(self.am_long, bar)
-
+        # 新窗口开仓
+        net_pos = abs(getattr(self, "pos", 0))
         # 平仓信号优先
         if signal == "close_long" and self.pos_state.direction == "long":
             self.close_position(bar.close_price, "LongWindow Close triggered")
         elif signal == "close_short" and self.pos_state.direction == "short":
             self.close_position(bar.close_price, "ShortWindow Close triggered")
-        # 新窗口开仓
         elif signal in ["long", "short"]:
+            if (signal == self.pos_state.direction and self.max_pos <= net_pos):
+                return
             self.pending_windows[signal] = PendingWindow(
                 direction=signal,
                 start_bar=self.long_bar_count,
                 long_end=self.long_bar_count + self.signal_window,
                 long_end_time=bar.datetime + timedelta(days=1),
             )
+            self.write_log(f"[on_long_bar] generate pending_windows: direction={signal} start_bar={self.long_bar_count}")
             self.trades_taken_in_window[signal] = 0
             opposite = "long" if signal == "short" else "short"
             self.pending_windows.pop(opposite, None)
@@ -532,7 +550,7 @@ class DualStrategy(CtaTemplate):
         self.am_short.update_bar(bar)
         if not self.am_short.inited:
             return
-        atr = self.am_short.atr(self.atr_window)
+        atr = self.am_long.atr(self.atr_window)
         for side in list(self.pending_windows.keys()):
             if self.trades_taken_in_window[side] >= self.max_trades_per_window:
                 continue

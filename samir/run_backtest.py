@@ -1,3 +1,4 @@
+from enum import Enum
 import sys
 import os
 import numpy as np
@@ -47,14 +48,16 @@ def run_backtest():
         #     "target_intervals": "4H"
         # }
         setting = {
-            "long_kline": "D",
-            "short_kline": "30m",
+            "long_kline": "4h",
+            "short_kline": "1h",
             "signal_window": 4,
             "atr_window": 14,
-            "sl_multiplier": 1.5,
-            "tp_multiplier": 4,
+            "sl_multiplier": 3,
+            "tp_multiplier": 3,
             "max_trades_per_window": 1,
             "trade_volume": 1,
+            "short_fast_ema": 2,
+            "short_slow_ema": 20
         }
         # 添加策略
         engine.add_strategy(Strategy, setting)
@@ -123,6 +126,8 @@ def save_results_fixed(engine, statistics):
             return obj.tolist()
         elif isinstance(obj, (datetime, date)):
             return obj.isoformat()
+        elif isinstance(obj, Enum):
+            return obj.value
         else:
             return obj
 
@@ -153,6 +158,11 @@ def save_results_fixed(engine, statistics):
     except Exception as e:
         print(f"✗ 保存回测日志失败: {e}")
 
+    trades_file = os.path.join(results_dir, f"trades_{timestamp}.json")
+    trades_list = [convert_numpy_types(tr.__dict__) for tr in engine.trades.values()]
+    with open(trades_file, "w", encoding="utf-8") as f:
+        json.dump(trades_list, f, indent=2, ensure_ascii=False)
+    print("Saved trades to", trades_file)
 
 # 在您的回测脚本中调用：
 # save_results_fixed(engine, statistics)
