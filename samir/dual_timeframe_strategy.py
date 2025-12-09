@@ -474,7 +474,7 @@ class DualStrategy(CtaTemplate):
         # ArrayManager
         self.am_long = ArrayManager(100)
         self.am_short = ArrayManager(100)
-
+        self.bg_long_bars: list[BarData] = []
         # 默认插件
         self.long_signal_strategy: LongSignalStrategy = ShenlongLong(owner = self)
         self.short_signal_strategy: ShortSignalStrategy = EMA_CrossShort(owner = self, fast=self.short_fast_ema, slow=self.short_slow_ema)
@@ -497,6 +497,9 @@ class DualStrategy(CtaTemplate):
     def on_long_bar(self, bar: BarData):
         self.long_bar_count += 1
         self.am_long.update_bar(bar)
+        self.bg_long_bars.append(bar)
+        if len(self.bg_long_bars) > 500:
+            self.bg_long_bars.pop(0)
         if not self.am_long.inited:
             return
         print(
