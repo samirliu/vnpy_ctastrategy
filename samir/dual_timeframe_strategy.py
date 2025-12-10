@@ -135,12 +135,15 @@ class ShenlongLong(LongSignalStrategy):
                 return float(arr[idx])
             except:
                 return float("nan")
-
+        #下通道线
         g116_0 = safe(g_ibuf_116, 0)
         g116_1 = safe(g_ibuf_116, 1)
+        #上通道线
         g120_0 = safe(g_ibuf_120, 0)
         g120_1 = safe(g_ibuf_120, 1)
+        #腰带线上沿
         slld0_0 = safe(slld_0, 0)
+        #腰带线下沿
         slld8_0 = safe(slld_8, 0)
         low_0, low_1 = lows[0], lows[1]
         high_0, high_1 = highs[0], highs[1]
@@ -150,16 +153,14 @@ class ShenlongLong(LongSignalStrategy):
             g116_1 < low_1
             and g116_0 > low_0
             and (
-                (g120_0 > slld0_0 and g116_0 > slld8_0)
-                or (g120_0 < slld0_0 and g116_0 > slld8_0)
+                g116_0 > slld8_0
             )
         )
         condition_sell = (
             high_1 < g120_1
             and high_0 > g120_0
             and (
-                (g120_0 < slld0_0 and g116_0 < slld8_0)
-                or (g120_0 < slld0_0 and g116_0 > slld8_0)
+                g120_0 < slld0_0
             )
         )
 
@@ -169,7 +170,7 @@ class ShenlongLong(LongSignalStrategy):
             and high_0 > g120_0
             and (
                 (g120_0 > slld0_0 and g116_0 > slld8_0)
-                or not (g120_0 < slld0_0 and g116_0 > slld8_0)
+                # or not (g120_0 < slld0_0 and g116_0 > slld8_0)
             )
         )
         condition_close_sell = (
@@ -177,7 +178,7 @@ class ShenlongLong(LongSignalStrategy):
             and g116_0 > low_0
             and (
                 (g120_0 < slld0_0 and g116_0 < slld8_0)
-                or not (g120_0 < slld0_0 and g116_0 > slld8_0)
+                # or not (g120_0 < slld0_0 and g116_0 > slld8_0)
             )
         )
         split = "[generate_window_signal]  "
@@ -642,7 +643,7 @@ class DualStrategy(CtaTemplate):
             "orderid": orderid,
             "reason": reason,
         }
-        
+
     # -------------------------
     # SL/TP 检查
     # -------------------------
