@@ -472,7 +472,7 @@ class DualStrategy(CtaTemplate):
         )
 
         # ArrayManager
-        self.am_long = ArrayManager(100)
+        self.am_long = ArrayManager(1000)
         self.am_short = ArrayManager(100)
         self.bg_long_bars: list[BarData] = []
         # 默认插件
@@ -598,7 +598,7 @@ class DualStrategy(CtaTemplate):
 
     def open_short(self, price, volume, sl, tp):
         try:
-            orderid = self.sell(price, volume)
+            orderid = self.short(price, volume)
         except:
             orderid = None
         self._pending_entry = {
@@ -625,8 +625,14 @@ class DualStrategy(CtaTemplate):
         try:
             if dirn == "long":
                 orderid = self.sell(price, vol)
+                self.write_log(
+                    f"[close_position： sell] side={dirn} price={price} vol={vol} orderid={orderid} reason={reason}"
+                )
             else:
-                orderid = self.buy(price, vol)
+                orderid = self.cover(price, vol)
+                self.write_log(
+                    f"[close_position： cover] side={dirn} price={price} vol={vol} orderid={orderid} reason={reason}"
+                )
         except:
             orderid = None
         self._pending_close = {
@@ -636,10 +642,7 @@ class DualStrategy(CtaTemplate):
             "orderid": orderid,
             "reason": reason,
         }
-        self.write_log(
-            f"[close_position] side={dirn} price={price} vol={vol} orderid={orderid} reason={reason}"
-        )
-
+        
     # -------------------------
     # SL/TP 检查
     # -------------------------
@@ -674,7 +677,7 @@ class DualStrategy(CtaTemplate):
         self.write_log(
             f"[on_trade] orderid={trade.orderid}, trade bar={trade.datetime}, "
             f"{trade.direction.name}-{trade.offset.name}, "
-            f"price={trade.price}, volume={trade.volume}"
+            f"price={trade.price}, volume={trade.volume}\n"
         )
         try:
             if trade.offset == Offset.OPEN:

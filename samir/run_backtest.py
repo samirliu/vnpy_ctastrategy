@@ -6,6 +6,7 @@ import json
 from datetime import date, datetime
 from vnpy_ctastrategy.backtesting import BacktestingEngine
 from vnpy.trader.constant import Interval
+# from dragen_channel_strategy_1128 import DragenStrategyExact as Strategy
 from dual_timeframe_strategy import DualStrategy as Strategy
 
 # from vnpy_ctastrategy.strategies.atr_rsi_strategy import AtrRsiStrategy as Strategy
@@ -28,7 +29,7 @@ def run_backtest():
         engine.set_parameters(
             vt_symbol="XAUUSD.COMEX",  # 确保这个品种的数据已导入
             interval=Interval.MINUTE,
-            start=datetime(2025, 1, 21),
+            start=datetime(2024, 11, 21),
             end=datetime(2025, 11, 28),
             rate=2.5e-05,  # 手续费
             slippage=0.2,  # 滑点
@@ -49,7 +50,7 @@ def run_backtest():
         # }
         setting = {
             "long_kline": "4h",
-            "short_kline": "1h",
+            "short_kline": "30m",
             "signal_window": 4,
             "atr_window": 14,
             "sl_multiplier": 3,
@@ -57,7 +58,7 @@ def run_backtest():
             "max_trades_per_window": 1,
             "trade_volume": 1,
             "short_fast_ema": 2,
-            "short_slow_ema": 20
+            "short_slow_ema": 30
         }
         # 添加策略
         engine.add_strategy(Strategy, setting)
@@ -92,12 +93,13 @@ def run_backtest():
 
         # 保存结果
         save_results_fixed(engine, statistics)
-
+        return engine
     except Exception as e:
         print(f"回测过程中出错: {e}")
         import traceback
 
         traceback.print_exc()
+
 
 
 def save_results_fixed(engine, statistics):

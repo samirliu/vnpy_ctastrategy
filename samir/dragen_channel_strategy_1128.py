@@ -9,8 +9,7 @@ from datetime import time
 from functools import partial
 import numpy as np
 
-from myconstant import Interval
-from myutility import BarGenerator
+from myutility import BarGenerator, Interval
 from vnpy_ctastrategy import (
     CtaTemplate, StopOrder, TickData, BarData, TradeData,
     OrderData, ArrayManager
@@ -87,7 +86,7 @@ class DragenStrategyExact(CtaTemplate):
         # 生成 4 小时 K 线（每 4 根小时线合成一根 4H）
         
         # 每个周期创建独立的 ArrayManager（大小保持 300，和原版一致）
-        self.am = ArrayManager(100)
+        self.am = ArrayManager(1000)
 
         # 绑定回调（使用 partial 传入目标周期标识）
         on_window_bar = partial(self._on_tf_bar, self.long_kline)
@@ -189,6 +188,10 @@ class DragenStrategyExact(CtaTemplate):
         # 下面这些 ibuf 的计算直接沿用你原来实现
         g_ibuf_116 = 2.0 * xma3_1 - xma2_1
         g_ibuf_120 = 2.0 * xma2_1 - xma3_1
+        # for i in range(0, 5):
+        #     print(
+        #         f"Bar {i}: g_ibuf_116={g_ibuf_116[i]} , g_ibuf_120={g_ibuf_120[i]}"
+        #     )
         # g_ibuf_124 = 3.9 * (xma2_1 - xma3_1) + xma2_1
         # g_ibuf_128 = xma3_1 - 3.9 * (xma2_1 - xma3_1)
 
@@ -369,12 +372,19 @@ class DragenStrategyExact(CtaTemplate):
         for i in range(length - 2, -1, -1):
             belt2[i] = (2 * belt0[i] + (self.belt_smooth_period - 1) * belt2[i + 1]) / (self.belt_smooth_period + 1)
             belt3[i] = (2 * belt1[i] + (self.belt_smooth_period - 1) * belt3[i + 1]) / (self.belt_smooth_period + 1)
+            # print(
+            #     f"Bar {i + 1}: belt2= {belt2[i + 1]}, belt3 = {belt3[i+1]}"
+            # )
+ 
 
         # belt4 与 slld
         belt4 = belt2 - belt3
         slld_0 = belt2 + 2.0 * belt4
         slld_8 = belt3 - 2.0 * belt4
-
+        # for i in range(0, 5):
+        #     print(
+        #         f"Bar {i}: belt0= {belt0[i]}, belt1= {belt1[i]}, belt2={belt2[i]}, belt3 = {belt3[i]}, belt4 = {belt4[i]}, slld_0 = {slld_0[i]}, slld_8 = {slld_8[i]}"
+        #     )
         return belt2, belt3, belt4, slld_0, slld_8
 
     def _compute_centered_ma_mql4(self, length: int, data: np.ndarray, window: int) -> np.ndarray:
@@ -406,7 +416,7 @@ class DragenStrategyExact(CtaTemplate):
                 adjustment = (half_window - mql4_i) / (half_window + mql4_i + 1)
                 result[mql4_i] = (sum_val + sum_val * adjustment) / window
         # result = result[::-1] 
-        # for i in range(0, length):
+        # for i in range(0, 5):
         #     print(
         #         f"Bar {i}: result={result[i]}"
         #     )
